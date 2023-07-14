@@ -18,47 +18,53 @@ rhEff=FALSE  # if TRUE, enables Q10 feedback with temperature (affects soil resp
 betaEff=FALSE  # if TRUE, enables CO2 fertilization feedback (affects NPP)
 coupled=FALSE  # this refers to coupling with Hector. If true, then NBP_constraint is set each year for Hector
 
-
+# Load in leaf data:
+# EITHER  by reading from raw gcamdata xml files and GCAM output data base with
+# functions in gcam_utils.R (read_data == TRUE),
+# OR if that has been done already and saved (read_data==FALSE), just load those
 if (read_data){
+
   # get input data from GCAM
-  land_roots <- read_land_inputs_xml2(folder="~/Dropbox/Github/gcam-core/input/gcamdata/xml")
-  
+
   gcam_land_alloc <- get_gcam_land_alloc(db_name="database_basexdb",
                                          gcam_dir="~/Dropbox/Research/gcam_projects/task3.1a/gcam_output/",
                                          scenario="Reference", read_from_file=FALSE)  # scenario is doing nothing when read_from_file is TRUE
-  
-  leaf_data <- process_xml_inputs(land_roots, gcam_land_alloc)
 
-  saveRDS(leaf_data,file="data/leaf_data_test.RDS")  # store for future use
-  
-  # this currently does something weird. Alternative is to just change the land roots in the read_land_inputs_xml2 to either include or not include protected land
+  leaf_data <- process_xml_inputs(land_roots = read_land_inputs_xml2(folder="~/Dropbox/Github/gcam-core/input/gcamdata/xml",
+                                                                     protected = protected),
+                                  gcam_land_alloc)
+
+
+  # Store for future use:
   if (protected){
-    input_file <- "~/Dropbox/Github/gcam-core/input/gcamdata/xml/protected_land_input_2.xml"
-    additional_file <- "~/Dropbox/Github/gcam-core/input/gcamdata/xml/protected_land_input_3.xml"
-    leaf_data <- add_protected_leaves(leaf_data,input_file,additional_file,gcam_land_alloc)
     saveRDS(leaf_data,file="data/protected_leaf_data.RDS")  # store for future use
-  }
-  
+  } else {
+    saveRDS(leaf_data,file="data/leaf_data.RDS")  # store for future use
+  } # end storing for future use
+
+
 } else {
   if (protected){
     leaf_data <- readRDS(file="protected_leaf_data.RDS")
   } else leaf_data <- readRDS(file="leaf_data.RDS")
-}
+} # End loading in leaf data
+
+
 
 leaf_data$name <- paste0(leaf_data$region,"_",leaf_data$landleaf)  # add single column with region + leaf info for easier reference later
 
 if (read_params){
   # get soil timescale data
   # TODO update to be compatible with eventual updates to make landleaf specific soil timescales
-  soil_timescales <- get_soilTS_byRegion(land_roots[[1]])  
+  soil_timescales <- get_soilTS_byRegion(land_roots[[1]])
   soil_timescales$soilTimeScale <- as.numeric(soil_timescales$soilTimeScale)
-  
+
   outer_params2 <- get_leaf_params(land_roots, soil_timescales, leaf_data)
   saveRDS(outer_params2,file="param_data.RDS")
-  
+
 } else {
   outer_params2 <- readRDS("updated_param_data.RDS")
-  
+
 }
 
 

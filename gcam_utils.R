@@ -1,6 +1,6 @@
 library(dplyr)  # needed for pipelines
 
-read_land_inputs_xml2 <- function(folder="inputs"){
+read_land_inputs_xml2 <- function(folder="inputs", protected){
   land1 <- xml2::read_xml(paste0(folder,"/land_input_1.xml"))
   land1_root <- xml2::xml_root(land1)
 
@@ -16,14 +16,32 @@ read_land_inputs_xml2 <- function(folder="inputs"){
   land5 <- xml2::read_xml(paste0(folder,"/land_input_5_IRR_MGMT.xml"))
   land5_root <- xml2::xml_root(land5)
 
-  land_roots <- list(land1_root, land2_root, land3_root, land4_root, land5_root)
+
+  if(protected == TRUE){
+    protland2 <- xml2::read_xml(paste0(folder,"/protected_land_input_2.xml"))
+    protland2_root <- xml2::xml_root(protland2)
+
+    protland3 <- xml2::read_xml(paste0(folder,"/protected_land_input_3.xml"))
+    protland3_root <- xml2::xml_root(protland3)
+
+    land_roots <- list(land1_root,
+                       land2_root,
+                       land3_root,
+                       land4_root,
+                       land5_root,
+                       protland2_root,
+                       protland3_root)
+
+
+  }else{
+    land_roots <- list(land1_root, land2_root, land3_root, land4_root, land5_root)
+  }
 
   return(land_roots)
 }
 
 
 process_xml_inputs <- function(land_roots, gcam_land_alloc, nleaves=0, nrows=0){
-
   # make dataframe
   # Units | scenario | region | landleaf | year | value | variable
 
@@ -35,20 +53,82 @@ process_xml_inputs <- function(land_roots, gcam_land_alloc, nleaves=0, nrows=0){
 
   colnames(all_data) <- table_cols
 
-
   # process leaves in each land root at a time
   count <- 0
-  for (i in 1:length(land_roots)){
+  for (i in 1:5){
     data <- data.frame(region=character(),
-                           landleaf=character(),year=integer(),
-                           land_alloc=double())
+                       landleaf=character(),year=integer(),
+                       land_alloc=double())
     colnames(data) <- table_cols
-    # find all leaves in a single land root
-    # make sure this also gets unmanaged
-    all_leaves <- xml2::xml_find_all(land_roots[[i]],"//LandLeaf")
-    unmanaged_leaves <- xml2::xml_find_all(land_roots[[i]], "//UnmanagedLandLeaf")
-    all_leaves <- c(all_leaves, unmanaged_leaves)
+
+    # find all leaves in a single land root level and make sure this also gets
+    # unmanaged:
+    #
+    #   Notes on why we have if statements:
+    #   Have to treat land inputs 2 and 3 specially for the protected lands case.
+    #   HAve to keep some but not all of the entries in the original land_inputs file
+    #   and it's manual and ugly but it works. If we ever dramatically change
+    #   how GCAM does protected lands or how many land nests there are, this will
+    #   have to be recoded.
+
+    if( i == 2 & length(land_roots) == 7){
+
+      orig_leaf <- xml2::xml_find_all(land_roots[[i]],"//LandLeaf")
+      orig_unmgd <- xml2::xml_find_all(land_roots[[i]], "//UnmanagedLandLeaf")
+
+      # there are no protected LandLeaf entries, only protected UnmanagedLandLeaf:
+      prot_unmgd <- xml2::xml_find_all(land_roots[[6]], "//UnmanagedLandLeaf")
+
+
+      # For land input 2, straightforward. We just do leaf and and protected
+      # unmanaged. We can tell this from assumptions in the data system
+      #TODO integrate this code directly with data system so have access to these
+      # to be able to make more robust and less hardcoded?
+      # https://github.com/JGCRI/gcamdata/blob/main/inst/extdata/aglu/A_LandLeaf2.csv
+      # https://github.com/JGCRI/gcamdata/blob/main/inst/extdata/aglu/A_LandLeaf_Unmgd2.csv
+      # The only Level 2 unmanaged land leaf is UnmanagedPasture, and that
+      # does become protected
+      all_leaves <- c(orig_leaf, prot_unmgd)
+
+
+    }else if(i==3 & length(land_roots) == 7){
+      orig_leaf <- xml2::xml_find_all(land_roots[[i]],"//LandLeaf")
+      orig_unmgd <- xml2::xml_find_all(land_roots[[i]], "//UnmanagedLandLeaf")
+
+      # there are no protected LandLeaf entries, only protected UnmanagedLandLeaf:
+      prot_unmgd <- xml2::xml_find_all(land_roots[[7]], "//UnmanagedLandLeaf")
+
+
+      # Level 3 is even more hardcoded/relying un expertise, unfortunately.
+      # https://github.com/JGCRI/gcamdata/blob/main/inst/extdata/aglu/A_LandLeaf3.csv
+      # https://github.com/JGCRI/gcamdata/blob/main/inst/extdata/aglu/A_LandLeaf_Unmgd3.csv
+      #
+      # Just like with level 2, we want he LandLeaf files as is.
+      # Unlike Level 2, There are 4 kinds of unmanaged land leaf instead of just 1:
+      # UnmanagedForest
+      # Shrubland
+      # Grassland
+      # OtherArableLand
+
+      # UnmanagedForest,Shrubland and Grassland all have protected versions,
+      # so we just want to read the prot_unmgd for them.
+      # But there is no protected OtherArableLand. So we want to keep
+      # just the OtherArableLand entries from orig_unmanaged
+      #
+
+      all_leaves <- c(orig_leaf,
+                      orig_unmgd[grepl('OtherArableLand', orig_unmgd)],
+                      prot_unmgd)
+
+    }else{
+      all_leaves <- xml2::xml_find_all(land_roots[[i]],"//LandLeaf")
+      unmanaged_leaves <- xml2::xml_find_all(land_roots[[i]], "//UnmanagedLandLeaf")
+      all_leaves <- c(all_leaves, unmanaged_leaves)
+
+    } # End 'find all leaves in a single land root level '
+
     leaf_count <- 0
+
 
     # TODO for efficiency: run leaves in batches of 250 at a time, then add 250 on to main database and redefine data
     for (leaf in all_leaves){
@@ -66,12 +146,19 @@ process_xml_inputs <- function(land_roots, gcam_land_alloc, nleaves=0, nrows=0){
                            land_alloc=double())
         colnames(data) <- table_cols
         leaf_count <- 0
-      }
+      } # end if leaf_count==250
 
-    }
+    } #end for leaf in all_leaves
     all_data <- dplyr::bind_rows(all_data,data)  # bind remaining leaves that have not been covered already
-  }
+  } # end for i in 1:length(roots)
+
   return(all_data)
+
+
+
+
+
+
 }
 
 process_leaf <- function(leaf_node, gcam_land_alloc){
@@ -105,11 +192,11 @@ parse_c_densities <- function(leaf_data, years){
 
 get_leaf_land_alloc <- function(leaf_node, leaf_name, leaf_region, gcam_land_alloc){
   leaf_data <- xml2::as_list(leaf_node)  # convert leaf data from xml into something parseable in R
-  
+
   land_alloc_df <- parse_land_alloc(leaf_data)  # get the historical land allocation data from the xmls
-  
+
   gcam_leaf_land_alloc <- get_gcam_land_alloc_by_leaf(leaf_region=leaf_region, leaf_name=leaf_name, gcam_alloc=gcam_land_alloc)
-  
+
   # find all years of overlap between modeled and historical land alloc and remove from historical
   first_model_year <- gcam_leaf_land_alloc$year[1]
   idx <- match(first_model_year, land_alloc_df$year)
@@ -161,58 +248,6 @@ parse_land_alloc <- function(leaf_data){
   return(data.frame(year=c(hist_df$year,mdrn_df$year),value=c(hist_df$value,mdrn_df$value)))
 
 }
-
-add_protected_leaves <- function(leaf_data_out, first_xml, second_xml, gcam_land_alloc){
-
-  first_set <- xml2::read_xml(first_xml)
-  first_root <- xml2::xml_root(first_set)
-
-  second_set <- xml2::read_xml(second_xml)
-  second_root <- xml2::xml_root(second_set)
-
-  print(paste0("LEAVES: ",length(unique(paste0(leaf_data_out$region,leaf_data_out$landleaf)))))
-
-  table_cols <- c("region","landleaf","year","land_alloc")
-  data <- data.frame(region=character(),
-                     landleaf=character(),year=integer(),
-                     land_alloc=double())
-  colnames(data) <- table_cols
-
-  # gather all managed and un-managed leaves from both xmls
-  leaf_set <- c(xml2::xml_find_all(first_root,"//LandLeaf"),
-                xml2::xml_find_all(first_root, "//UnmanagedLandLeaf"),
-                xml2::xml_find_all(second_root,"//LandLeaf"),
-                xml2::xml_find_all(second_root, "//UnmanagedLandLeaf"))
-
-  print(length(leaf_set))
-  count <- 0
-  all_leaf_names <- NULL
-  for (leaf in leaf_set){
-    print(count)
-    new_leaf_data <- process_leaf(leaf,gcam_land_alloc)
-    leaf_reg <- new_leaf_data$region[[1]]
-    leaf_name <- new_leaf_data$landleaf[[1]]
-    all_leaf_names <- c(all_leaf_names,paste0(leaf_reg,"_",leaf_name))
-    #leaf_idx <- which(leaf_data_out$region == leaf_reg & leaf_data_out$landleaf == leaf_name)
-    #leaf_data_out <- leaf_data_out[-c(leaf_idx),]  # remove old leaf from original data
-    #print(paste0("LEAVES: ",length(unique(paste0(leaf_data_out$region,leaf_data_out$landleaf)))))
-    data <- dplyr::bind_rows(data,new_leaf_data)  # adding to smaller dataframe then will add to large one at end
-    count <- count + 1
-  }
-
-  print(paste0("LEAVES BEFORE: ",length(unique(paste0(leaf_data_out$region,leaf_data_out$landleaf)))))
-  print(length(all_leaf_names))
-  leaf_data_out <- leaf_data_out[!(leaf_data_out$name %in% all_leaf_names),]
-  print(paste0("LEAVES AFTER REMOVING: ",length(unique(paste0(leaf_data_out$region,leaf_data_out$landleaf)))))
-
-  leaf_data_out <- dplyr::bind_rows(leaf_data_out,data)
-
-  print(paste0("LEAVES AFTER ADDING: ",length(unique(paste0(leaf_data_out$region,leaf_data_out$landleaf)))))
-
-  return(leaf_data_out)
-
-}
-
 
 get_leaf_params <- function(land_roots, soilTimeScales, land_alloc_data, data_names = c("above-ground-carbon-density","below-ground-carbon-density","mature-age")
 ){
