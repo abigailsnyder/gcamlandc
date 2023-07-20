@@ -42,6 +42,8 @@ read_land_inputs_xml2 <- function(folder="inputs", protected){
 
 
 process_xml_inputs <- function(land_roots, gcam_land_alloc, nleaves=0, nrows=0){
+  # land_roots dictates what leaves get covered
+
   # make dataframe
   # Units | scenario | region | landleaf | year | value | variable
 
@@ -55,7 +57,9 @@ process_xml_inputs <- function(land_roots, gcam_land_alloc, nleaves=0, nrows=0){
 
   # process leaves in each land root at a time
   count <- 0
-  for (i in 1:5){
+  for (i in 1:5){ # Loop over the 5 non-protected land_input_*.xml file roots,
+                  # which are the first five entries of the output list of
+                  # read_land_inputs_xml2()
     data <- data.frame(region=character(),
                        landleaf=character(),year=integer(),
                        land_alloc=double())
